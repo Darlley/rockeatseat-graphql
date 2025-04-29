@@ -65,16 +65,107 @@ import { Field, ObjectType } from "type-graphql";
 
 @ObjectType()
 export class User {
-  @Field(() => String) // Declarar explicitamente o tipo como String
+  @Field(() => String)
   name: string;
 
-  @Field(() => String) // Caso tenha campos adicionais, como id
+  @Field(() => String)
   id: String;
 }
 ```
 
 ### FRONTEND
 
-Vamos criar um projeto com vitejs `npm create vite@latest`
+Vamos criar um projeto React com Vitejs `npm create vite@latest`.
 
-GRaphQL Substitui o SWR e React Query.
+Vamos instalar as dependências `npm i @apollo/client graphql` apenas. O Apollo Client funciona como um gerenciador de estados, ele substitui libs como SWR e React Query.
+
+Temos que criar um client:
+
+```ts
+export const client = new ApolloClient({
+  uri: 'http://localhost:4000/',
+  cache: new InMemoryCache(),
+})
+```
+
+E usar este client no `ApolloProvider`:
+
+```tsx
+<ApolloProvider client={client}>
+  <App />
+</ApolloProvider>
+```
+
+E nos componentes agora usamos a mesma instancia com hooks do Apollo, `useQuery` para queries (listagens):
+
+```tsx
+
+function App() {
+  const { data } = useQuery>(
+    gql`
+      query Query {
+        users {
+          id
+          name
+        }
+      }
+    `
+  )
+
+  return (
+    <ul>
+      {data?.users?.map((user) => (
+        <li key={user.id}>{user.name}</li>
+      ))}
+    </ul>
+  )
+}
+```
+
+E `useMutation` para mutations (formulários):
+
+```tsx
+import { gql, useMutation } from '@apollo/client';
+
+export default function NewUserForm() {
+  const [name, setName] = useState('')
+  const [createUser, { data, loading, error }] = useMutation(
+    gql`mutation ($name: String!) {
+      createUser( name: $name ) { id, name } }
+    `
+  )
+
+  async function handleCreateUser(event: FormEvent) {
+    event.preventDefault()
+    if(!name) return;
+    await createUser({ variables: { name }})
+  }
+
+  return (
+    <form onSubmit={handleCreateUser}>
+      <input type='text' value={name} onChange={(e) => setName(e.target.value)} />
+      <button type='submit'>{loading ? 'Carregando...' : 'Criar'}</button>
+    </form>
+  )
+}
+```
+
+Para sincronizar realtime os dados entre um componente (listagem) e outro (form) basta usar update na mutation:
+
+```ts
+async function handleCreateUser(event: FormEvent) {
+  ...
+  await createUser({
+    ...
+    update: (cache, { data: { createUser} }) => { // 👈 AQUI
+      const { users } = client.readQuery({ query: GET_USERS })
+      cache.writeQuery({
+        query: GET_USERS,
+        data: {
+          users: [...users, createUser]
+        }
+      })
+    }
+  })
+}
+```
